@@ -13,81 +13,87 @@ let peer = new RTCPeerConnection({
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
 });
 
-// ✅ Always set ontrack listener first
+// Always set ontrack early
 peer.ontrack = (event) => {
-  console.log("📥 Viewer received stream:", event.streams[0]);
+  console.log("👁️ Viewer received remote stream.");
   video.srcObject = event.streams[0];
 };
 
-// ✅ Handle ICE candidates
 peer.onicecandidate = (event) => {
   if (event.candidate) {
     socket.emit("candidate", { roomId, candidate: event.candidate });
   }
 };
 
-// ✅ Join room via socket
+// Emit join
 socket.emit("join-room", roomId);
 
+// ----- HOST -----
 if (role === "host") {
-  // Start screen sharing
   shareBtn.onclick = async () => {
-    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-    video.srcObject = screenStream;
-    shareBtn.style.display = "none";
-    stopBtn.style.display = "inline";
+    try {
+      screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      video.srcObject = screenStream;
+      shareBtn.style.display = "none";
+      stopBtn.style.display = "inline";
 
-    // Add screen tracks to peer connection
-    screenStream.getTracks().forEach(track => {
-      peer.addTrack(track, screenStream);
-    });
+      // Add track
+      screenStream.getTracks().forEach(track => {
+        peer.addTrack(track, screenStream);
+      });
 
-    // Send offer
-    const offer = await peer.createOffer();
-    await peer.setLocalDescription(offer);
-    socket.emit("offer", { roomId, offer });
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      socket.emit("offer", { roomId, offer });
+    } catch (err) {
+      alert("Error sharing screen: " + err.message);
+    }
   };
 
-  // Stop screen share
   stopBtn.onclick = () => {
     screenStream.getTracks().forEach(track => track.stop());
     shareBtn.style.display = "inline";
     stopBtn.style.display = "none";
   };
 } else {
-  // Viewer should not see share button
   shareBtn.style.display = "none";
   stopBtn.style.display = "none";
 }
 
-// ✅ Receive offer (viewer side)
+// ----- VIEWER -----
 socket.on("offer", async ({ offer }) => {
-  console.log("📩 Offer received");
-  await peer.setRemoteDescription(offer);
-  const answer = await peer.createAnswer();
-  await peer.setLocalDescription(answer);
-  socket.emit("answer", { roomId, answer });
+  try {
+    console.log("📩 Viewer received offer");
+    await peer.setRemoteDescription(new RTCSessionDescription(offer));
+
+    const answer = await peer.createAnswer();
+    await peer.setLocalDescription(answer);
+    socket.emit("answer", { roomId, answer });
+  } catch (err) {
+    console.error("Error handling offer:", err);
+  }
 });
 
-// ✅ Receive answer (host side)
 socket.on("answer", async ({ answer }) => {
-  console.log("✅ Answer received");
-  await peer.setRemoteDescription(answer);
+  try {
+    console.log("✅ Host received answer");
+    await peer.setRemoteDescription(new RTCSessionDescription(answer));
+  } catch (err) {
+    console.error("Error setting remote description on host:", err);
+  }
 });
 
-// ✅ Receive ICE candidates (both sides)
 socket.on("candidate", async ({ candidate }) => {
   if (candidate) {
     try {
-      await peer.addIceCandidate(candidate);
+      await peer.addIceCandidate(new RTCIceCandidate(candidate));
     } catch (err) {
-      console.error("❌ Error adding candidate", err);
+      console.error("Failed to add ICE candidate:", err);
     }
   }
 });
 
-
-// 🗨️ Chat system
+// 💬 Chat
 const messages = document.getElementById("messages");
 document.getElementById("chatInput").addEventListener("keypress", e => {
   if (e.key === "Enter") sendMessage();
@@ -109,12 +115,12 @@ function appendMsg(m) {
   messages.scrollTop = messages.scrollHeight;
 }
 
-// 🌙 Toggle Dark Mode
+// 🌙 Dark mode
 document.getElementById("toggleModeBtn").onclick = () => {
   document.body.classList.toggle("dark");
 };
 
-// 📋 Copy Invite Link
+// 📋 Copy room invite
 document.getElementById("copyLinkBtn").onclick = () => {
   const link = `${window.location.origin}/room.html?room=${roomId}&role=viewer`;
   navigator.clipboard.writeText(link);
