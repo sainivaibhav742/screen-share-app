@@ -1,0 +1,26 @@
+
+body {
+  font-family: Arial;
+  text-align: center;
+  background: #111;
+  color: white;
+}
+
+button {
+  padding: 10px 20px;
+  margin: 20px;
+  background-color: #00aaff;
+  border: none;
+  color: white;
+  font-size: 16px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+video {
+  margin-top: 20px;
+  width: 80%;
+  max-height: 80vh;
+  border: 2px solid #00aaff;
+  border-radius: 12px;
+}
