@@ -73,13 +73,16 @@ if (role === "host") {
   shareBtn.style.display = "none";
   stopBtn.style.display = "none";
 
-  setTimeout(() => {
-    if (!video.srcObject) {
-      streamStatus.innerText = "❌ Viewer: No Stream Received";
-      streamStatus.style.color = "red";
-      console.warn("⚠️ Viewer did not receive any stream in time.");
-    }
-  }, 5000);
+setTimeout(() => {
+  if (!video.srcObject) {
+    console.warn("⚠️ Viewer did not receive any stream in time.");
+    streamStatus.innerText = "❌ Viewer: No Stream Received. Retrying...";
+    streamStatus.style.color = "red";
+
+    // ⏳ Attempt to reconnect (send 'join-room' again)
+    socket.emit("join-room", roomId);
+  }
+}, 5000);
 }
 
 // Handle signaling
