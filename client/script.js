@@ -24,23 +24,41 @@ let remoteStream = new MediaStream();
 let peer = null;
 
 function createPeerConnection() {
-  peer = new RTCPeerConnection({
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-  });
-
-  peer.ontrack = (event) => {
-    if (event.streams[0]) {
-      video.srcObject = event.streams[0];
-      streamStatus.innerText = "✅ Viewer: Live Stream Active";
-      streamStatus.style.color = "green";
+  try {
+    if (peer) {
+      peer.close();
+      peer = null;
     }
-  };
 
-  peer.onicecandidate = (event) => {
-    if (event.candidate) {
-      socket.emit("candidate", { roomId, candidate: event.candidate });
-    }
-  };
+    peer = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    });
+
+    peer.ontrack = (event) => {
+      if (event.streams[0]) {
+        video.srcObject = event.streams[0];
+        streamStatus.innerText = "✅ Viewer: Live Stream Active";
+        streamStatus.style.color = "green";
+      }
+    };
+
+    peer.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit("candidate", { roomId, candidate: event.candidate });
+      }
+    };
+
+    peer.onconnectionstatechange = () => {
+      console.log("Connection state:", peer.connectionState);
+      if (peer.connectionState === "failed") {
+        alert("Connection failed! Please try again");
+        stopAllStreams();
+      }
+    };
+  } catch (err) {
+    console.error("Peer connection creation failed:", err);
+    alert("WebRTC connection error: " + err.message);
+  }
 }
 
 function updateStatusIndicators() {
@@ -53,9 +71,13 @@ function updateStatusIndicators() {
 
 async function startScreenShare() {
   try {
-    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    createPeerConnection();
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ 
+      video: true, 
+      audio: true 
+    });
 
-    // Check for mic explicitly
+    // Add mic if available
     try {
       const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
       mic.getAudioTracks().forEach(track => screenStream.addTrack(track));
@@ -75,6 +97,7 @@ async function startScreenShare() {
     shareBtn.style.display = "none";
     stopBtn.style.display = "inline";
   } catch (err) {
+    console.error("Screen sharing failed:", err);
     alert("Screen sharing failed: " + err.message);
   }
 }
@@ -82,12 +105,20 @@ async function startScreenShare() {
 function stopAllStreams() {
   screenStream?.getTracks().forEach(t => t.stop());
   webcamStream?.getTracks().forEach(t => t.stop());
-  peer?.close();
-  createPeerConnection();
+  
+  if (peer) {
+    peer.close();
+    peer = null;
+  }
+  
   video.srcObject = null;
   webcamVideo.srcObject = null;
   shareBtn.style.display = "inline";
   stopBtn.style.display = "none";
+  
+  // Reset status indicators
+  micStatus.innerText = "🎤 Mic: Off";
+  sysStatus.innerText = "🔊 System Audio: Off";
 }
 
 async function toggleWebcam() {
@@ -98,6 +129,8 @@ async function toggleWebcam() {
     camBtn.innerText = "📷 Turn On Camera";
   } else {
     try {
+      if (!peer) createPeerConnection();
+      
       webcamStream = await navigator.mediaDevices.getUserMedia({ video: true });
       webcamVideo.srcObject = webcamStream;
       webcamStream.getTracks().forEach(track => peer.addTrack(track, webcamStream));
@@ -108,7 +141,6 @@ async function toggleWebcam() {
   }
 }
 
-createPeerConnection();
 socket.emit("join-room", roomId);
 
 if (role === "host") {
@@ -120,19 +152,26 @@ if (role === "host") {
   stopBtn.style.display = "none";
   camBtn.style.display = "none";
 
-  let retries = 0;
-  const check = setInterval(() => {
-    if (video.srcObject) {
-      clearInterval(check);
-    } else if (++retries >= 10) {
-      streamStatus.innerText = "❌ Viewer: No Stream Received";
+  // Improved viewer connection handling
+  streamStatus.innerText = "⏳ Waiting for host stream...";
+  streamStatus.style.color = "orange";
+  
+  socket.once("offer", () => {
+    streamStatus.innerText = "🟡 Connecting to stream...";
+    streamStatus.style.color = "orange";
+  });
+  
+  setTimeout(() => {
+    if (!video.srcObject) {
+      streamStatus.innerText = "❌ Failed to receive stream";
       streamStatus.style.color = "red";
-      clearInterval(check);
     }
-  }, 1000);
+  }, 15000); // 15 seconds timeout
 }
 
 socket.on("offer", async ({ offer }) => {
+  if (role !== "viewer") return;
+  
   createPeerConnection();
   await peer.setRemoteDescription(new RTCSessionDescription(offer));
   const answer = await peer.createAnswer();
@@ -141,11 +180,16 @@ socket.on("offer", async ({ offer }) => {
 });
 
 socket.on("answer", async ({ answer }) => {
+  if (!peer) return;
   await peer.setRemoteDescription(new RTCSessionDescription(answer));
 });
 
 socket.on("candidate", async ({ candidate }) => {
   try {
+    if (!peer) {
+      console.warn("Received ICE candidate but peer is not initialized");
+      return;
+    }
     await peer.addIceCandidate(new RTCIceCandidate(candidate));
   } catch (err) {
     console.warn("ICE candidate error:", err);
@@ -167,7 +211,7 @@ function sendMessage() {
   input.value = "";
 }
 
-socket.on("chat", ({ msg }) => appendMsg(`👤 Viewer: ${msg}`));
+socket.on("chat", ({ msg }) => appendMsg(`👤 ${role === 'host' ? 'Viewer' : 'Host'}: ${msg}`));
 
 function appendMsg(m) {
   messages.innerHTML += `<div>${m}</div>`;
@@ -190,7 +234,16 @@ document.getElementById("copyLinkBtn").onclick = () => {
 function embedYouTube() {
   const ytUrl = document.getElementById("ytLink").value.trim();
   if (!ytUrl.includes("youtube.com") && !ytUrl.includes("youtu.be")) return alert("Invalid YouTube link");
-  const videoId = ytUrl.split("v=")[1]?.split("&")[0] || ytUrl.split("/").pop();
+  
+  let videoId;
+  if (ytUrl.includes("youtu.be")) {
+    videoId = ytUrl.split("/").pop().split("?")[0];
+  } else {
+    videoId = ytUrl.split("v=")[1]?.split("&")[0];
+  }
+  
+  if (!videoId) return alert("Could not extract video ID");
+  
   document.getElementById("ytPlayer").innerHTML = `
     <iframe width="560" height="315" src="https://www.youtube.com/embed/${videoId}?autoplay=1"
     frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;

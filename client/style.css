@@ -116,3 +116,15 @@ video {
   color: white;
   border: 1px solid #555;
 }
+/* Add to bottom of file */
+#streamStatus.connecting {
+  color: orange !important;
+}
+
+#streamStatus.error {
+  color: red !important;
+}
+
+#streamStatus.live {
+  color: green !important;
+}
