@@ -37,11 +37,21 @@ button {
 
 video {
   width: 90%;
-  margin: 1rem auto;
+  max-width: 1000px;
+  height: 80vh;
+  margin: 1.5rem auto;
   display: block;
-  border: 2px solid #007bff;
+  background-color: #000;
+  border: 3px solid #007bff;
   border-radius: 12px;
+  box-shadow: 0 0 20px rgba(0, 123, 255, 0.3);
+  transition: box-shadow 0.3s ease-in-out;
 }
+
+video:hover {
+  box-shadow: 0 0 25px rgba(0, 123, 255, 0.6);
+}
+
 
 #chat {
   max-width: 600px;

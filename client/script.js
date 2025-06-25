@@ -16,7 +16,6 @@ const stopBtn = document.getElementById("stopBtn");
 const streamStatus = document.getElementById("streamStatus");
 
 let screenStream = null;
-let remoteStream = new MediaStream();
 let peer = null;
 
 function createPeerConnection() {
@@ -24,12 +23,15 @@ function createPeerConnection() {
     iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
   });
 
+  // Viewer: Receive screen stream
   peer.ontrack = (event) => {
-    if (event.track) {
-      remoteStream.addTrack(event.track);
-      video.srcObject = remoteStream;
+    console.log("🟣 Viewer: Received ontrack");
+    if (event.streams && event.streams[0]) {
+      video.srcObject = event.streams[0];
       streamStatus.innerText = "✅ Viewer: Live Stream Active";
       streamStatus.style.color = "green";
+    } else {
+      console.warn("⚠️ No stream found on event.");
     }
   };
 
@@ -43,20 +45,33 @@ function createPeerConnection() {
 createPeerConnection();
 socket.emit("join-room", roomId);
 
+// 📺 Host: Start screen sharing
 if (role === "host") {
   shareBtn.onclick = async () => {
     try {
-      screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-      video.srcObject = screenStream;
-      shareBtn.style.display = "none";
-      stopBtn.style.display = "inline";
+      screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          displaySurface: "monitor",
+          cursor: "always"
+        },
+        audio: false
+      });
 
-      screenStream.getTracks().forEach(track => peer.addTrack(track, screenStream));
+      video.srcObject = screenStream;
+
+      screenStream.getTracks().forEach(track => {
+        peer.addTrack(track, screenStream);
+      });
+
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
       socket.emit("offer", { roomId, offer });
+
+      shareBtn.style.display = "none";
+      stopBtn.style.display = "inline";
     } catch (err) {
       alert("Screen sharing failed: " + err.message);
+      console.error("⛔ Error:", err);
     }
   };
 
@@ -69,9 +84,11 @@ if (role === "host") {
     stopBtn.style.display = "none";
   };
 } else {
+  // Viewer UI
   shareBtn.style.display = "none";
   stopBtn.style.display = "none";
 
+  // If no stream received in 10 seconds
   let attempts = 0;
   const checkStream = setInterval(() => {
     if (video.srcObject) {
@@ -87,6 +104,8 @@ if (role === "host") {
   }, 1000);
 }
 
+// 🔄 WebRTC Signaling
+
 socket.on("offer", async ({ offer }) => {
   try {
     await peer.setRemoteDescription(new RTCSessionDescription(offer));
@@ -94,7 +113,7 @@ socket.on("offer", async ({ offer }) => {
     await peer.setLocalDescription(answer);
     socket.emit("answer", { roomId, answer });
   } catch (err) {
-    console.error("Offer handling error:", err);
+    console.error("⚠️ Offer error:", err);
   }
 });
 
@@ -102,20 +121,21 @@ socket.on("answer", async ({ answer }) => {
   try {
     await peer.setRemoteDescription(new RTCSessionDescription(answer));
   } catch (err) {
-    console.error("Answer set failed:", err);
+    console.error("⚠️ Answer error:", err);
   }
 });
 
 socket.on("candidate", async ({ candidate }) => {
-  if (candidate) {
-    try {
+  try {
+    if (candidate) {
       await peer.addIceCandidate(new RTCIceCandidate(candidate));
-    } catch (err) {
-      console.error("ICE candidate error:", err);
     }
+  } catch (err) {
+    console.error("⚠️ ICE error:", err);
   }
 });
 
+// 💬 Chat
 const messages = document.getElementById("messages");
 document.getElementById("chatInput").addEventListener("keypress", e => {
   if (e.key === "Enter") sendMessage();
@@ -137,12 +157,14 @@ function appendMsg(m) {
   messages.scrollTop = messages.scrollHeight;
 }
 
+// 🌙 Dark mode
 document.getElementById("toggleModeBtn").onclick = () => {
   document.body.classList.toggle("dark");
 };
 
+// 📋 Copy link
 document.getElementById("copyLinkBtn").onclick = () => {
   const link = `${window.location.origin}/room.html?room=${roomId}&role=viewer`;
   navigator.clipboard.writeText(link);
-  alert("✅ Link copied to clipboard:\n" + link);
+  alert("✅ Link copied:\n" + link);
 };
