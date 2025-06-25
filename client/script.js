@@ -3,7 +3,7 @@ const urlParams = new URLSearchParams(window.location.search);
 let roomId = urlParams.get("room");
 const role = urlParams.get("role");
 
-// 🔧 Auto-generate room if not present
+// 🔧 Auto-generate room ID if missing
 if (!roomId || !role) {
   const newRoom = Math.random().toString(36).substring(2, 8);
   window.location.href = `/room.html?room=${newRoom}&role=host`;
@@ -23,15 +23,15 @@ function createPeerConnection() {
     iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
   });
 
-  // Viewer: Receive screen stream
   peer.ontrack = (event) => {
-    console.log("🟣 Viewer: Received ontrack");
+    console.log("🟣 Viewer: Received ontrack", event);
     if (event.streams && event.streams[0]) {
       video.srcObject = event.streams[0];
       streamStatus.innerText = "✅ Viewer: Live Stream Active";
       streamStatus.style.color = "green";
     } else {
-      console.warn("⚠️ No stream found on event.");
+      streamStatus.innerText = "❌ Viewer: No valid stream received";
+      streamStatus.style.color = "red";
     }
   };
 
@@ -45,23 +45,18 @@ function createPeerConnection() {
 createPeerConnection();
 socket.emit("join-room", roomId);
 
-// 📺 Host: Start screen sharing
+// 🖥️ Host logic
 if (role === "host") {
   shareBtn.onclick = async () => {
     try {
       screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          displaySurface: "monitor",
-          cursor: "always"
-        },
+        video: { displaySurface: "monitor", cursor: "always" },
         audio: false
       });
 
       video.srcObject = screenStream;
 
-      screenStream.getTracks().forEach(track => {
-        peer.addTrack(track, screenStream);
-      });
+      screenStream.getTracks().forEach(track => peer.addTrack(track, screenStream));
 
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
@@ -70,13 +65,15 @@ if (role === "host") {
       shareBtn.style.display = "none";
       stopBtn.style.display = "inline";
     } catch (err) {
-      alert("Screen sharing failed: " + err.message);
-      console.error("⛔ Error:", err);
+      alert("❌ Screen sharing failed: " + err.message);
+      console.error("Host screen share error:", err);
     }
   };
 
   stopBtn.onclick = () => {
-    screenStream.getTracks().forEach(t => t.stop());
+    if (screenStream) {
+      screenStream.getTracks().forEach(t => t.stop());
+    }
     peer.close();
     createPeerConnection();
     video.srcObject = null;
@@ -88,15 +85,12 @@ if (role === "host") {
   shareBtn.style.display = "none";
   stopBtn.style.display = "none";
 
-  // If no stream received in 10 seconds
+  // Wait 10 seconds max for stream
   let attempts = 0;
   const checkStream = setInterval(() => {
     if (video.srcObject) {
       clearInterval(checkStream);
-      return;
-    }
-    attempts++;
-    if (attempts >= 10) {
+    } else if (++attempts >= 10) {
       streamStatus.innerText = "❌ Viewer: No Stream Received";
       streamStatus.style.color = "red";
       clearInterval(checkStream);
@@ -104,8 +98,7 @@ if (role === "host") {
   }, 1000);
 }
 
-// 🔄 WebRTC Signaling
-
+// 📡 WebRTC signaling
 socket.on("offer", async ({ offer }) => {
   try {
     await peer.setRemoteDescription(new RTCSessionDescription(offer));
@@ -113,7 +106,7 @@ socket.on("offer", async ({ offer }) => {
     await peer.setLocalDescription(answer);
     socket.emit("answer", { roomId, answer });
   } catch (err) {
-    console.error("⚠️ Offer error:", err);
+    console.error("Viewer offer error:", err);
   }
 });
 
@@ -121,7 +114,7 @@ socket.on("answer", async ({ answer }) => {
   try {
     await peer.setRemoteDescription(new RTCSessionDescription(answer));
   } catch (err) {
-    console.error("⚠️ Answer error:", err);
+    console.error("Host answer error:", err);
   }
 });
 
@@ -131,7 +124,7 @@ socket.on("candidate", async ({ candidate }) => {
       await peer.addIceCandidate(new RTCIceCandidate(candidate));
     }
   } catch (err) {
-    console.error("⚠️ ICE error:", err);
+    console.error("ICE candidate error:", err);
   }
 });
 
@@ -157,12 +150,12 @@ function appendMsg(m) {
   messages.scrollTop = messages.scrollHeight;
 }
 
-// 🌙 Dark mode
+// 🌙 Dark mode toggle
 document.getElementById("toggleModeBtn").onclick = () => {
   document.body.classList.toggle("dark");
 };
 
-// 📋 Copy link
+// 📋 Copy invite link
 document.getElementById("copyLinkBtn").onclick = () => {
   const link = `${window.location.origin}/room.html?room=${roomId}&role=viewer`;
   navigator.clipboard.writeText(link);
