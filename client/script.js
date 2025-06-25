@@ -7,28 +7,32 @@ document.getElementById("room-id").innerText = roomId;
 const video = document.getElementById("screenVideo");
 const shareBtn = document.getElementById("shareBtn");
 const stopBtn = document.getElementById("stopBtn");
+const streamStatus = document.getElementById("streamStatus");
 
 let screenStream;
 let peer = new RTCPeerConnection({
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
 });
 
-// Always set ontrack early
+// Track received video stream
 peer.ontrack = (event) => {
-  console.log("👁️ Viewer received remote stream.");
+  console.log("🎥 ontrack triggered!");
   video.srcObject = event.streams[0];
+  streamStatus.innerText = "✅ Viewer: Live Stream Active";
+  streamStatus.style.color = "green";
 };
 
+// ICE candidate handling
 peer.onicecandidate = (event) => {
   if (event.candidate) {
     socket.emit("candidate", { roomId, candidate: event.candidate });
   }
 };
 
-// Emit join
+// Join the room
 socket.emit("join-room", roomId);
 
-// ----- HOST -----
+// Host logic
 if (role === "host") {
   shareBtn.onclick = async () => {
     try {
@@ -37,7 +41,6 @@ if (role === "host") {
       shareBtn.style.display = "none";
       stopBtn.style.display = "inline";
 
-      // Add track
       screenStream.getTracks().forEach(track => {
         peer.addTrack(track, screenStream);
       });
@@ -56,11 +59,20 @@ if (role === "host") {
     stopBtn.style.display = "none";
   };
 } else {
+  // Hide buttons for viewer
   shareBtn.style.display = "none";
   stopBtn.style.display = "none";
+
+  // Add fallback if no stream
+  setTimeout(() => {
+    if (!video.srcObject) {
+      streamStatus.innerText = "❌ Viewer: No Stream Received";
+      streamStatus.style.color = "red";
+    }
+  }, 5000);
 }
 
-// ----- VIEWER -----
+// Viewer receives offer
 socket.on("offer", async ({ offer }) => {
   try {
     console.log("📩 Viewer received offer");
@@ -74,6 +86,7 @@ socket.on("offer", async ({ offer }) => {
   }
 });
 
+// Host receives answer
 socket.on("answer", async ({ answer }) => {
   try {
     console.log("✅ Host received answer");
@@ -83,6 +96,7 @@ socket.on("answer", async ({ answer }) => {
   }
 });
 
+// Both receive ICE candidates
 socket.on("candidate", async ({ candidate }) => {
   if (candidate) {
     try {
@@ -93,7 +107,7 @@ socket.on("candidate", async ({ candidate }) => {
   }
 });
 
-// 💬 Chat
+// 💬 Chat functionality
 const messages = document.getElementById("messages");
 document.getElementById("chatInput").addEventListener("keypress", e => {
   if (e.key === "Enter") sendMessage();
@@ -115,12 +129,12 @@ function appendMsg(m) {
   messages.scrollTop = messages.scrollHeight;
 }
 
-// 🌙 Dark mode
+// 🌙 Dark mode toggle
 document.getElementById("toggleModeBtn").onclick = () => {
   document.body.classList.toggle("dark");
 };
 
-// 📋 Copy room invite
+// 📋 Copy invite link
 document.getElementById("copyLinkBtn").onclick = () => {
   const link = `${window.location.origin}/room.html?room=${roomId}&role=viewer`;
   navigator.clipboard.writeText(link);
