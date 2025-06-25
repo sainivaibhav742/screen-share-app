@@ -10,11 +10,17 @@ if (!roomId || !role) {
 
 document.getElementById("room-id").innerText = roomId;
 const video = document.getElementById("screenVideo");
+const webcamVideo = document.getElementById("webcamVideo");
 const shareBtn = document.getElementById("shareBtn");
 const stopBtn = document.getElementById("stopBtn");
+const camBtn = document.getElementById("camBtn");
 const streamStatus = document.getElementById("streamStatus");
+const micStatus = document.getElementById("micStatus");
+const sysStatus = document.getElementById("sysStatus");
 
 let screenStream = null;
+let webcamStream = null;
+let remoteStream = new MediaStream();
 let peer = null;
 
 function createPeerConnection() {
@@ -23,7 +29,7 @@ function createPeerConnection() {
   });
 
   peer.ontrack = (event) => {
-    if (event.streams && event.streams[0]) {
+    if (event.streams[0]) {
       video.srcObject = event.streams[0];
       streamStatus.innerText = "✅ Viewer: Live Stream Active";
       streamStatus.style.color = "green";
@@ -37,90 +43,112 @@ function createPeerConnection() {
   };
 }
 
+function updateStatusIndicators() {
+  const hasMic = screenStream?.getAudioTracks().some(t => t.kind === 'audio' && t.label.toLowerCase().includes('microphone'));
+  const hasSystem = screenStream?.getAudioTracks().some(t => t.kind === 'audio' && !t.label.toLowerCase().includes('microphone'));
+
+  micStatus.innerText = `🎤 Mic: ${hasMic ? "On" : "Off"}`;
+  sysStatus.innerText = `🔊 System Audio: ${hasSystem ? "On" : "Off"}`;
+}
+
+async function startScreenShare() {
+  try {
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+
+    // Check for mic explicitly
+    try {
+      const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mic.getAudioTracks().forEach(track => screenStream.addTrack(track));
+    } catch {
+      alert("⚠️ Mic access denied or not available.");
+    }
+
+    screenStream.getTracks().forEach(track => peer.addTrack(track, screenStream));
+    video.srcObject = screenStream;
+
+    updateStatusIndicators();
+
+    const offer = await peer.createOffer();
+    await peer.setLocalDescription(offer);
+    socket.emit("offer", { roomId, offer });
+
+    shareBtn.style.display = "none";
+    stopBtn.style.display = "inline";
+  } catch (err) {
+    alert("Screen sharing failed: " + err.message);
+  }
+}
+
+function stopAllStreams() {
+  screenStream?.getTracks().forEach(t => t.stop());
+  webcamStream?.getTracks().forEach(t => t.stop());
+  peer?.close();
+  createPeerConnection();
+  video.srcObject = null;
+  webcamVideo.srcObject = null;
+  shareBtn.style.display = "inline";
+  stopBtn.style.display = "none";
+}
+
+async function toggleWebcam() {
+  if (webcamStream) {
+    webcamStream.getTracks().forEach(t => t.stop());
+    webcamStream = null;
+    webcamVideo.srcObject = null;
+    camBtn.innerText = "📷 Turn On Camera";
+  } else {
+    try {
+      webcamStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      webcamVideo.srcObject = webcamStream;
+      webcamStream.getTracks().forEach(track => peer.addTrack(track, webcamStream));
+      camBtn.innerText = "📷 Turn Off Camera";
+    } catch {
+      alert("Camera access denied or not available.");
+    }
+  }
+}
+
 createPeerConnection();
 socket.emit("join-room", roomId);
 
 if (role === "host") {
-  shareBtn.onclick = async () => {
-    try {
-      const screen = await navigator.mediaDevices.getDisplayMedia({ video: true });
-      const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      screenStream = new MediaStream([
-        ...screen.getVideoTracks(),
-        ...mic.getAudioTracks()
-      ]);
-
-      video.srcObject = screenStream;
-
-      screenStream.getTracks().forEach(track => peer.addTrack(track, screenStream));
-
-      const offer = await peer.createOffer();
-      await peer.setLocalDescription(offer);
-      socket.emit("offer", { roomId, offer });
-
-      shareBtn.style.display = "none";
-      stopBtn.style.display = "inline";
-      streamStatus.innerText = "🟢 Host: Streaming Started";
-      streamStatus.style.color = "green";
-    } catch (err) {
-      alert("❌ Screen sharing failed: " + err.message);
-    }
-  };
-
-  stopBtn.onclick = () => {
-    screenStream.getTracks().forEach(t => t.stop());
-    peer.close();
-    createPeerConnection();
-    video.srcObject = null;
-    shareBtn.style.display = "inline";
-    stopBtn.style.display = "none";
-  };
+  shareBtn.onclick = startScreenShare;
+  stopBtn.onclick = stopAllStreams;
+  camBtn.onclick = toggleWebcam;
 } else {
   shareBtn.style.display = "none";
   stopBtn.style.display = "none";
+  camBtn.style.display = "none";
 
-  let attempts = 0;
-  const checkStream = setInterval(() => {
+  let retries = 0;
+  const check = setInterval(() => {
     if (video.srcObject) {
-      clearInterval(checkStream);
-      return;
-    }
-    attempts++;
-    if (attempts >= 10) {
+      clearInterval(check);
+    } else if (++retries >= 10) {
       streamStatus.innerText = "❌ Viewer: No Stream Received";
       streamStatus.style.color = "red";
-      clearInterval(checkStream);
+      clearInterval(check);
     }
   }, 1000);
 }
 
 socket.on("offer", async ({ offer }) => {
-  try {
-    await peer.setRemoteDescription(new RTCSessionDescription(offer));
-    const answer = await peer.createAnswer();
-    await peer.setLocalDescription(answer);
-    socket.emit("answer", { roomId, answer });
-  } catch (err) {
-    console.error("Offer handling error:", err);
-  }
+  createPeerConnection();
+  await peer.setRemoteDescription(new RTCSessionDescription(offer));
+  const answer = await peer.createAnswer();
+  await peer.setLocalDescription(answer);
+  socket.emit("answer", { roomId, answer });
 });
 
 socket.on("answer", async ({ answer }) => {
-  try {
-    await peer.setRemoteDescription(new RTCSessionDescription(answer));
-  } catch (err) {
-    console.error("Answer set failed:", err);
-  }
+  await peer.setRemoteDescription(new RTCSessionDescription(answer));
 });
 
 socket.on("candidate", async ({ candidate }) => {
-  if (candidate) {
-    try {
-      await peer.addIceCandidate(new RTCIceCandidate(candidate));
-    } catch (err) {
-      console.error("ICE candidate error:", err);
-    }
+  try {
+    await peer.addIceCandidate(new RTCIceCandidate(candidate));
+  } catch (err) {
+    console.warn("ICE candidate error:", err);
   }
 });
 
@@ -146,7 +174,7 @@ function appendMsg(m) {
   messages.scrollTop = messages.scrollHeight;
 }
 
-// Dark mode toggle
+// Dark mode
 document.getElementById("toggleModeBtn").onclick = () => {
   document.body.classList.toggle("dark");
 };
@@ -155,18 +183,15 @@ document.getElementById("toggleModeBtn").onclick = () => {
 document.getElementById("copyLinkBtn").onclick = () => {
   const link = `${window.location.origin}/room.html?room=${roomId}&role=viewer`;
   navigator.clipboard.writeText(link);
-  alert("✅ Link copied: " + link);
+  alert("✅ Link copied:\n" + link);
 };
 
-// YouTube embed
+// YouTube stream
 function embedYouTube() {
   const ytUrl = document.getElementById("ytLink").value.trim();
-  if (!ytUrl.includes("youtube.com") && !ytUrl.includes("youtu.be"))
-    return alert("Invalid YouTube link");
-
+  if (!ytUrl.includes("youtube.com") && !ytUrl.includes("youtu.be")) return alert("Invalid YouTube link");
   const videoId = ytUrl.split("v=")[1]?.split("&")[0] || ytUrl.split("/").pop();
   document.getElementById("ytPlayer").innerHTML = `
     <iframe width="560" height="315" src="https://www.youtube.com/embed/${videoId}?autoplay=1"
-      frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
-  `;
+    frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>`;
 }

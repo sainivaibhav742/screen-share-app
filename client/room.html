@@ -1,33 +1,51 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8" />
   <title>Room | Screen Share</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body class="light">
-  <header>
-    <h2>Room: <span id="room-id"></span></h2>
-    <button id="copyLinkBtn">Copy Invite Link</button>
-    <button id="toggleModeBtn">🌙</button>
-  </header>
-  <main>
-    <p id="streamStatus" style="font-weight:bold; text-align:center;"></p>
-    <video id="screenVideo" autoplay playsinline></video>
+  <header style="display: flex; justify-content: space-between; padding: 1em; background: #007bff; color: white;">
+    <div><strong>Room:</strong> <span id="room-id"></span></div>
     <div>
+      <button id="copyLinkBtn">Copy Invite Link</button>
+      <button id="toggleModeBtn">🌙</button>
+    </div>
+  </header>
+
+  <main style="text-align: center; padding: 1em;">
+    <p id="streamStatus" style="font-weight: bold; color: red;"></p>
+    <video id="screenVideo" autoplay playsinline muted></video>
+
+    <div style="margin: 1em;">
+      <video id="webcamVideo" autoplay playsinline style="width: 300px; border: 2px solid #28a745; border-radius: 10px; margin-top: 1em;"></video>
+    </div>
+
+    <div id="statusInfo" style="margin-top: 1em;">
+      <span id="micStatus">🎤 Mic: Off</span> |
+      <span id="sysStatus">🔊 System Audio: Off</span>
+    </div>
+
+    <div style="margin-top: 1em;">
       <button id="shareBtn">Start Sharing</button>
-      <button id="stopBtn" style="display:none;">Stop Sharing</button>
+      <button id="stopBtn" style="display: none;">Stop Sharing</button>
+      <button id="camBtn">📷 Turn On Camera</button>
     </div>
   </main>
-  <section id="chat">
-    <div id="messages"></div>
+
+  <section id="chat" style="padding: 1em;">
+    <div id="messages" style="max-height: 150px; overflow-y: auto; border: 1px solid #ccc; padding: 0.5rem; margin-bottom: 0.5em;"></div>
     <input id="chatInput" placeholder="Type message..." />
     <button onclick="sendMessage()">Send</button>
   </section>
-  <div id="youtubeContainer" style="text-align:center;margin-top:1em;">
+
+  <div id="youtubeContainer" style="text-align: center; margin-top: 1em;">
     <input type="text" id="ytLink" placeholder="Paste YouTube Link" />
     <button onclick="embedYouTube()">Stream YouTube</button>
-    <div id="ytPlayer"></div>
+    <div id="ytPlayer" style="margin-top: 1em;"></div>
   </div>
+
   <script src="/socket.io/socket.io.js"></script>
   <script src="script.js"></script>
 </body>
