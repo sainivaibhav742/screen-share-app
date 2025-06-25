@@ -1,7 +1,13 @@
 const socket = io();
 const urlParams = new URLSearchParams(window.location.search);
-const roomId = urlParams.get("room");
+let roomId = urlParams.get("room");
 const role = urlParams.get("role");
+
+// 🔧 Auto-generate room if not present
+if (!roomId || !role) {
+  const newRoom = Math.random().toString(36).substring(2, 8);
+  window.location.href = `/room.html?room=${newRoom}&role=host`;
+}
 
 document.getElementById("room-id").innerText = roomId;
 const video = document.getElementById("screenVideo");
@@ -10,6 +16,7 @@ const stopBtn = document.getElementById("stopBtn");
 const streamStatus = document.getElementById("streamStatus");
 
 let screenStream = null;
+let remoteStream = new MediaStream();
 let peer = null;
 
 function createPeerConnection() {
@@ -17,18 +24,14 @@ function createPeerConnection() {
     iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
   });
 
-const remoteStream = new MediaStream();
-
-peer.ontrack = (event) => {
-  console.log("🟣 Viewer: Received ontrack event");
-  if (event.track) {
-    remoteStream.addTrack(event.track);
-    video.srcObject = remoteStream;
-
-    streamStatus.innerText = "✅ Viewer: Live Stream Active";
-    streamStatus.style.color = "green";
-  }
-};
+  peer.ontrack = (event) => {
+    if (event.track) {
+      remoteStream.addTrack(event.track);
+      video.srcObject = remoteStream;
+      streamStatus.innerText = "✅ Viewer: Live Stream Active";
+      streamStatus.style.color = "green";
+    }
+  };
 
   peer.onicecandidate = (event) => {
     if (event.candidate) {
@@ -38,11 +41,8 @@ peer.ontrack = (event) => {
 }
 
 createPeerConnection();
-
-// Socket: Join room
 socket.emit("join-room", roomId);
 
-// 🎥 HOST SIDE
 if (role === "host") {
   shareBtn.onclick = async () => {
     try {
@@ -51,10 +51,7 @@ if (role === "host") {
       shareBtn.style.display = "none";
       stopBtn.style.display = "inline";
 
-      screenStream.getTracks().forEach(track => {
-        peer.addTrack(track, screenStream);
-      });
-
+      screenStream.getTracks().forEach(track => peer.addTrack(track, screenStream));
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
       socket.emit("offer", { roomId, offer });
@@ -65,28 +62,33 @@ if (role === "host") {
 
   stopBtn.onclick = () => {
     screenStream.getTracks().forEach(t => t.stop());
+    peer.close();
+    createPeerConnection();
+    video.srcObject = null;
     shareBtn.style.display = "inline";
     stopBtn.style.display = "none";
-    video.srcObject = null;
-    createPeerConnection(); // reset peer
   };
 } else {
   shareBtn.style.display = "none";
   stopBtn.style.display = "none";
 
-  setTimeout(() => {
-    if (!video.srcObject) {
+  let attempts = 0;
+  const checkStream = setInterval(() => {
+    if (video.srcObject) {
+      clearInterval(checkStream);
+      return;
+    }
+    attempts++;
+    if (attempts >= 10) {
       streamStatus.innerText = "❌ Viewer: No Stream Received";
       streamStatus.style.color = "red";
+      clearInterval(checkStream);
     }
-  }, 5000);
+  }, 1000);
 }
 
-// 📡 Viewer receives offer
 socket.on("offer", async ({ offer }) => {
   try {
-    console.log("📩 Viewer received offer");
-    if (!peer) createPeerConnection();
     await peer.setRemoteDescription(new RTCSessionDescription(offer));
     const answer = await peer.createAnswer();
     await peer.setLocalDescription(answer);
@@ -96,17 +98,14 @@ socket.on("offer", async ({ offer }) => {
   }
 });
 
-// Host receives answer
 socket.on("answer", async ({ answer }) => {
   try {
-    console.log("✅ Host received answer");
     await peer.setRemoteDescription(new RTCSessionDescription(answer));
   } catch (err) {
     console.error("Answer set failed:", err);
   }
 });
 
-// Candidate sharing
 socket.on("candidate", async ({ candidate }) => {
   if (candidate) {
     try {
@@ -117,7 +116,6 @@ socket.on("candidate", async ({ candidate }) => {
   }
 });
 
-// 💬 Chat
 const messages = document.getElementById("messages");
 document.getElementById("chatInput").addEventListener("keypress", e => {
   if (e.key === "Enter") sendMessage();
@@ -139,14 +137,12 @@ function appendMsg(m) {
   messages.scrollTop = messages.scrollHeight;
 }
 
-// 🌙 Dark Mode
 document.getElementById("toggleModeBtn").onclick = () => {
   document.body.classList.toggle("dark");
 };
 
-// 📋 Copy Invite
 document.getElementById("copyLinkBtn").onclick = () => {
   const link = `${window.location.origin}/room.html?room=${roomId}&role=viewer`;
   navigator.clipboard.writeText(link);
-  alert("✅ Link copied!");
+  alert("✅ Link copied to clipboard:\n" + link);
 };
