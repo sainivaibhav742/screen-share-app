@@ -1,4 +1,3 @@
-
 const express = require("express");
 const app = express();
 const http = require("http").createServer(app);
@@ -8,14 +7,28 @@ const path = require("path");
 app.use(express.static(path.join(__dirname, "../client")));
 
 io.on("connection", socket => {
-  console.log("User connected");
+  socket.on("join-room", room => {
+    socket.join(room);
+  });
 
-  socket.on("offer", data => socket.broadcast.emit("offer", data));
-  socket.on("answer", data => socket.broadcast.emit("answer", data));
-  socket.on("candidate", data => socket.broadcast.emit("candidate", data));
+  socket.on("offer", ({ roomId, offer }) => {
+    socket.to(roomId).emit("offer", { offer });
+  });
+
+  socket.on("answer", ({ roomId, answer }) => {
+    socket.to(roomId).emit("answer", { answer });
+  });
+
+  socket.on("candidate", ({ roomId, candidate }) => {
+    socket.to(roomId).emit("candidate", { candidate });
+  });
+
+  socket.on("chat", ({ roomId, msg }) => {
+    socket.to(roomId).emit("chat", { msg });
+  });
 });
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
 });

@@ -1,18 +1,27 @@
-
+<!-- client/index.html -->
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Screen Sharing App</title>
-  <link rel="stylesheet" href="style.css" />
+  <title>Screen Share App</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h1>Real-Time Screen Sharing</h1>
-  <div>
-    <button id="shareBtn">Share Screen</button>
-  </div>
-  <video id="screenVideo" autoplay playsinline></video>
+  <h1>Screen Sharing App</h1>
+  <button onclick="startSharing()">Start Sharing</button>
+  <input id="roomCode" placeholder="Enter Room Code" />
+  <button onclick="joinRoom()">Join Room</button>
 
-  <script src="/socket.io/socket.io.js"></script>
-  <script src="script.js"></script>
+  <script>
+    function startSharing() {
+      const roomId = Math.random().toString(36).substr(2, 8);
+      window.location.href = `/room.html?room=${roomId}&role=host`;
+    }
+    function joinRoom() {
+      const room = document.getElementById('roomCode').value;
+      if (room) {
+        window.location.href = `/room.html?room=${room}&role=viewer`;
+      }
+    }
+  </script>
 </body>
 </html>

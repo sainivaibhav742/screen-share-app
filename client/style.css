@@ -1,26 +1,71 @@
-
 body {
-  font-family: Arial;
-  text-align: center;
-  background: #111;
+  font-family: sans-serif;
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  transition: background 0.3s, color 0.3s;
+}
+
+:root {
+  --bg: #ffffff;
+  --fg: #000000;
+}
+
+body.dark {
+  --bg: #121212;
+  --fg: #f2f2f2;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  padding: 1rem;
+  background: #333;
   color: white;
 }
 
 button {
-  padding: 10px 20px;
-  margin: 20px;
-  background-color: #00aaff;
-  border: none;
+  margin: 0.5rem;
+  padding: 10px 16px;
+  background-color: #007bff;
   color: white;
-  font-size: 16px;
-  border-radius: 6px;
+  border: none;
+  border-radius: 5px;
   cursor: pointer;
 }
 
 video {
-  margin-top: 20px;
-  width: 80%;
-  max-height: 80vh;
-  border: 2px solid #00aaff;
+  width: 90%;
+  margin: 1rem auto;
+  display: block;
+  border: 2px solid #007bff;
   border-radius: 12px;
+}
+
+#chat {
+  max-width: 600px;
+  margin: 1rem auto;
+  padding: 0.5rem;
+  border-top: 1px solid #ccc;
+}
+
+#messages {
+  height: 150px;
+  overflow-y: auto;
+  background: #eee;
+  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+  border-radius: 6px;
+}
+
+@media (max-width: 600px) {
+  video {
+    width: 100%;
+  }
+
+  header, button {
+    flex-direction: column;
+    text-align: center;
+  }
 }
