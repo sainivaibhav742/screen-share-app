@@ -15,7 +15,6 @@ const stopBtn = document.getElementById("stopBtn");
 const streamStatus = document.getElementById("streamStatus");
 
 let screenStream = null;
-let remoteStream = new MediaStream();
 let peer = null;
 
 function createPeerConnection() {
@@ -24,12 +23,11 @@ function createPeerConnection() {
   });
 
   peer.ontrack = (event) => {
-    console.log("📥 Track received:", event.track.kind);
-    remoteStream.addTrack(event.track);
-    video.srcObject = remoteStream;
-    video.onloadedmetadata = () => video.play();
-    streamStatus.innerText = "✅ Viewer: Live Stream Active";
-    streamStatus.style.color = "green";
+    if (event.streams && event.streams[0]) {
+      video.srcObject = event.streams[0];
+      streamStatus.innerText = "✅ Viewer: Live Stream Active";
+      streamStatus.style.color = "green";
+    }
   };
 
   peer.onicecandidate = (event) => {
@@ -45,16 +43,17 @@ socket.emit("join-room", roomId);
 if (role === "host") {
   shareBtn.onclick = async () => {
     try {
-      screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: { displaySurface: "monitor" },
-        audio: true
-      });
-
+      const screen = await navigator.mediaDevices.getDisplayMedia({ video: true });
       const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mic.getAudioTracks().forEach(track => screenStream.addTrack(track));
+
+      screenStream = new MediaStream([
+        ...screen.getVideoTracks(),
+        ...mic.getAudioTracks()
+      ]);
+
+      video.srcObject = screenStream;
 
       screenStream.getTracks().forEach(track => peer.addTrack(track, screenStream));
-      video.srcObject = screenStream;
 
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
@@ -62,8 +61,10 @@ if (role === "host") {
 
       shareBtn.style.display = "none";
       stopBtn.style.display = "inline";
+      streamStatus.innerText = "🟢 Host: Streaming Started";
+      streamStatus.style.color = "green";
     } catch (err) {
-      alert("Screen sharing failed: " + err.message);
+      alert("❌ Screen sharing failed: " + err.message);
     }
   };
 
@@ -71,6 +72,7 @@ if (role === "host") {
     screenStream.getTracks().forEach(t => t.stop());
     peer.close();
     createPeerConnection();
+    video.srcObject = null;
     shareBtn.style.display = "inline";
     stopBtn.style.display = "none";
   };
@@ -94,21 +96,35 @@ if (role === "host") {
 }
 
 socket.on("offer", async ({ offer }) => {
-  await peer.setRemoteDescription(new RTCSessionDescription(offer));
-  const answer = await peer.createAnswer();
-  await peer.setLocalDescription(answer);
-  socket.emit("answer", { roomId, answer });
+  try {
+    await peer.setRemoteDescription(new RTCSessionDescription(offer));
+    const answer = await peer.createAnswer();
+    await peer.setLocalDescription(answer);
+    socket.emit("answer", { roomId, answer });
+  } catch (err) {
+    console.error("Offer handling error:", err);
+  }
 });
 
 socket.on("answer", async ({ answer }) => {
-  await peer.setRemoteDescription(new RTCSessionDescription(answer));
+  try {
+    await peer.setRemoteDescription(new RTCSessionDescription(answer));
+  } catch (err) {
+    console.error("Answer set failed:", err);
+  }
 });
 
 socket.on("candidate", async ({ candidate }) => {
-  await peer.addIceCandidate(new RTCIceCandidate(candidate));
+  if (candidate) {
+    try {
+      await peer.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (err) {
+      console.error("ICE candidate error:", err);
+    }
+  }
 });
 
-// Chat functionality
+// Chat
 const messages = document.getElementById("messages");
 document.getElementById("chatInput").addEventListener("keypress", e => {
   if (e.key === "Enter") sendMessage();
@@ -142,7 +158,7 @@ document.getElementById("copyLinkBtn").onclick = () => {
   alert("✅ Link copied: " + link);
 };
 
-// YouTube embedding
+// YouTube embed
 function embedYouTube() {
   const ytUrl = document.getElementById("ytLink").value.trim();
   if (!ytUrl.includes("youtube.com") && !ytUrl.includes("youtu.be"))
