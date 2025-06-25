@@ -9,42 +9,40 @@ const shareBtn = document.getElementById("shareBtn");
 const stopBtn = document.getElementById("stopBtn");
 const streamStatus = document.getElementById("streamStatus");
 
-let screenStream;
-let peer = new RTCPeerConnection({
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-});
+let screenStream = null;
+let peer = null;
 
-peer.ontrack = (event) => {
-  console.log("🎥 Viewer ontrack triggered!", event.streams);
-  if (event.streams && event.streams[0]) {
+function createPeerConnection() {
+  peer = new RTCPeerConnection({
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+  });
+
+  peer.ontrack = (event) => {
+    console.log("🎥 Stream received!");
     video.srcObject = event.streams[0];
+    video.play().catch(console.error);
     streamStatus.innerText = "✅ Viewer: Live Stream Active";
     streamStatus.style.color = "green";
-  } else {
-    console.warn("⚠️ No stream attached in ontrack event!");
-  }
-};
+  };
 
-peer.onicecandidate = (event) => {
-  if (event.candidate) {
-    console.log("📡 ICE candidate sent:", event.candidate);
-    socket.emit("candidate", { roomId, candidate: event.candidate });
-  }
-};
+  peer.onicecandidate = (event) => {
+    if (event.candidate) {
+      socket.emit("candidate", { roomId, candidate: event.candidate });
+    }
+  };
+}
 
-peer.onconnectionstatechange = () => {
-  console.log("🔄 Connection State:", peer.connectionState);
-};
+createPeerConnection();
 
+// Socket: Join room
 socket.emit("join-room", roomId);
 
+// 🎥 HOST SIDE
 if (role === "host") {
   shareBtn.onclick = async () => {
     try {
       screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-      console.log("🖥️ Host captured stream:", screenStream);
       video.srcObject = screenStream;
-
       shareBtn.style.display = "none";
       stopBtn.style.display = "inline";
 
@@ -54,66 +52,62 @@ if (role === "host") {
 
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
-      console.log("📤 Host sending offer");
       socket.emit("offer", { roomId, offer });
     } catch (err) {
-      alert("Error sharing screen: " + err.message);
-      console.error("❌ getDisplayMedia error:", err);
+      alert("Screen sharing failed: " + err.message);
     }
   };
 
   stopBtn.onclick = () => {
-    screenStream.getTracks().forEach(track => track.stop());
+    screenStream.getTracks().forEach(t => t.stop());
     shareBtn.style.display = "inline";
     stopBtn.style.display = "none";
-    streamStatus.innerText = "🛑 Sharing stopped";
-    streamStatus.style.color = "gray";
+    video.srcObject = null;
+    createPeerConnection(); // reset peer
   };
 } else {
   shareBtn.style.display = "none";
   stopBtn.style.display = "none";
 
-setTimeout(() => {
-  if (!video.srcObject) {
-    console.warn("⚠️ Viewer did not receive any stream in time.");
-    streamStatus.innerText = "❌ Viewer: No Stream Received. Retrying...";
-    streamStatus.style.color = "red";
-
-    // ⏳ Attempt to reconnect (send 'join-room' again)
-    socket.emit("join-room", roomId);
-  }
-}, 5000);
+  setTimeout(() => {
+    if (!video.srcObject) {
+      streamStatus.innerText = "❌ Viewer: No Stream Received";
+      streamStatus.style.color = "red";
+    }
+  }, 5000);
 }
 
-// Handle signaling
+// 📡 Viewer receives offer
 socket.on("offer", async ({ offer }) => {
   try {
     console.log("📩 Viewer received offer");
+    if (!peer) createPeerConnection();
     await peer.setRemoteDescription(new RTCSessionDescription(offer));
     const answer = await peer.createAnswer();
     await peer.setLocalDescription(answer);
     socket.emit("answer", { roomId, answer });
   } catch (err) {
-    console.error("❌ Error handling offer:", err);
+    console.error("Offer handling error:", err);
   }
 });
 
+// Host receives answer
 socket.on("answer", async ({ answer }) => {
   try {
     console.log("✅ Host received answer");
     await peer.setRemoteDescription(new RTCSessionDescription(answer));
   } catch (err) {
-    console.error("❌ Error setting remote description:", err);
+    console.error("Answer set failed:", err);
   }
 });
 
+// Candidate sharing
 socket.on("candidate", async ({ candidate }) => {
   if (candidate) {
     try {
-      console.log("📶 Received ICE candidate", candidate);
       await peer.addIceCandidate(new RTCIceCandidate(candidate));
     } catch (err) {
-      console.error("🚨 Failed to add ICE candidate:", err);
+      console.error("ICE candidate error:", err);
     }
   }
 });
@@ -140,14 +134,14 @@ function appendMsg(m) {
   messages.scrollTop = messages.scrollHeight;
 }
 
-// 🌙 Dark mode toggle
+// 🌙 Dark Mode
 document.getElementById("toggleModeBtn").onclick = () => {
   document.body.classList.toggle("dark");
 };
 
-// 📋 Copy invite link
+// 📋 Copy Invite
 document.getElementById("copyLinkBtn").onclick = () => {
   const link = `${window.location.origin}/room.html?room=${roomId}&role=viewer`;
   navigator.clipboard.writeText(link);
-  alert("✅ Invite link copied!");
+  alert("✅ Link copied!");
 };
