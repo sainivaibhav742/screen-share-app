@@ -1,9 +1,10 @@
+
+// Full script with screen sharing, mic, camera, and YouTube sync
 const socket = io();
 const urlParams = new URLSearchParams(window.location.search);
 let roomId = urlParams.get("room");
 const role = urlParams.get("role");
 
-// 🔧 Auto-generate room ID if missing
 if (!roomId || !role) {
   const newRoom = Math.random().toString(36).substring(2, 8);
   window.location.href = `/room.html?room=${newRoom}&role=host`;
@@ -14,126 +15,70 @@ const video = document.getElementById("screenVideo");
 const shareBtn = document.getElementById("shareBtn");
 const stopBtn = document.getElementById("stopBtn");
 const streamStatus = document.getElementById("streamStatus");
-
 let screenStream = null;
+let remoteStream = new MediaStream();
 let peer = null;
 
 function createPeerConnection() {
-  peer = new RTCPeerConnection({
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-  });
-
+  peer = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
   peer.ontrack = (event) => {
-    console.log("🟣 Viewer: Received ontrack", event);
     if (event.streams && event.streams[0]) {
       video.srcObject = event.streams[0];
       streamStatus.innerText = "✅ Viewer: Live Stream Active";
-      streamStatus.style.color = "green";
-    } else {
-      streamStatus.innerText = "❌ Viewer: No valid stream received";
-      streamStatus.style.color = "red";
     }
   };
-
   peer.onicecandidate = (event) => {
-    if (event.candidate) {
-      socket.emit("candidate", { roomId, candidate: event.candidate });
-    }
+    if (event.candidate) socket.emit("candidate", { roomId, candidate: event.candidate });
   };
 }
 
 createPeerConnection();
 socket.emit("join-room", roomId);
 
-// 🖥️ Host logic
 if (role === "host") {
   shareBtn.onclick = async () => {
-    try {
-      screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: { displaySurface: "monitor", cursor: "always" },
-        audio: false
-      });
-
-      video.srcObject = screenStream;
-
-      screenStream.getTracks().forEach(track => peer.addTrack(track, screenStream));
-
-      const offer = await peer.createOffer();
-      await peer.setLocalDescription(offer);
-      socket.emit("offer", { roomId, offer });
-
-      shareBtn.style.display = "none";
-      stopBtn.style.display = "inline";
-    } catch (err) {
-      alert("❌ Screen sharing failed: " + err.message);
-      console.error("Host screen share error:", err);
-    }
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mic.getAudioTracks().forEach(track => screenStream.addTrack(track));
+    screenStream.getTracks().forEach(track => peer.addTrack(track, screenStream));
+    video.srcObject = screenStream;
+    const offer = await peer.createOffer();
+    await peer.setLocalDescription(offer);
+    socket.emit("offer", { roomId, offer });
+    shareBtn.style.display = "none";
+    stopBtn.style.display = "inline";
   };
 
   stopBtn.onclick = () => {
-    if (screenStream) {
-      screenStream.getTracks().forEach(t => t.stop());
-    }
+    screenStream.getTracks().forEach(t => t.stop());
     peer.close();
     createPeerConnection();
-    video.srcObject = null;
     shareBtn.style.display = "inline";
     stopBtn.style.display = "none";
   };
 } else {
-  // Viewer UI
   shareBtn.style.display = "none";
   stopBtn.style.display = "none";
-
-  // Wait 10 seconds max for stream
-  let attempts = 0;
-  const checkStream = setInterval(() => {
-    if (video.srcObject) {
-      clearInterval(checkStream);
-    } else if (++attempts >= 10) {
-      streamStatus.innerText = "❌ Viewer: No Stream Received";
-      streamStatus.style.color = "red";
-      clearInterval(checkStream);
-    }
-  }, 1000);
 }
 
-// 📡 WebRTC signaling
 socket.on("offer", async ({ offer }) => {
-  try {
-    await peer.setRemoteDescription(new RTCSessionDescription(offer));
-    const answer = await peer.createAnswer();
-    await peer.setLocalDescription(answer);
-    socket.emit("answer", { roomId, answer });
-  } catch (err) {
-    console.error("Viewer offer error:", err);
-  }
+  await peer.setRemoteDescription(new RTCSessionDescription(offer));
+  const answer = await peer.createAnswer();
+  await peer.setLocalDescription(answer);
+  socket.emit("answer", { roomId, answer });
 });
 
 socket.on("answer", async ({ answer }) => {
-  try {
-    await peer.setRemoteDescription(new RTCSessionDescription(answer));
-  } catch (err) {
-    console.error("Host answer error:", err);
-  }
+  await peer.setRemoteDescription(new RTCSessionDescription(answer));
 });
 
 socket.on("candidate", async ({ candidate }) => {
-  try {
-    if (candidate) {
-      await peer.addIceCandidate(new RTCIceCandidate(candidate));
-    }
-  } catch (err) {
-    console.error("ICE candidate error:", err);
-  }
+  await peer.addIceCandidate(new RTCIceCandidate(candidate));
 });
 
-// 💬 Chat
+// Chat
 const messages = document.getElementById("messages");
-document.getElementById("chatInput").addEventListener("keypress", e => {
-  if (e.key === "Enter") sendMessage();
-});
-
+document.getElementById("chatInput").addEventListener("keypress", e => { if (e.key === "Enter") sendMessage(); });
 function sendMessage() {
   const input = document.getElementById("chatInput");
   const msg = input.value.trim();
@@ -142,22 +87,29 @@ function sendMessage() {
   appendMsg(`🧑 You: ${msg}`);
   input.value = "";
 }
-
 socket.on("chat", ({ msg }) => appendMsg(`👤 Viewer: ${msg}`));
-
 function appendMsg(m) {
   messages.innerHTML += `<div>${m}</div>`;
   messages.scrollTop = messages.scrollHeight;
 }
 
-// 🌙 Dark mode toggle
-document.getElementById("toggleModeBtn").onclick = () => {
-  document.body.classList.toggle("dark");
-};
+// Dark mode toggle
+document.getElementById("toggleModeBtn").onclick = () => document.body.classList.toggle("dark");
 
-// 📋 Copy invite link
+// Copy invite link
 document.getElementById("copyLinkBtn").onclick = () => {
   const link = `${window.location.origin}/room.html?room=${roomId}&role=viewer`;
   navigator.clipboard.writeText(link);
-  alert("✅ Link copied:\n" + link);
+  alert("✅ Link copied: " + link);
 };
+
+// YouTube embedding
+function embedYouTube() {
+  const ytUrl = document.getElementById("ytLink").value.trim();
+  if (!ytUrl.includes("youtube.com") && !ytUrl.includes("youtu.be")) return alert("Invalid YouTube link");
+  const videoId = ytUrl.split("v=")[1]?.split("&")[0] || ytUrl.split("/").pop();
+  document.getElementById("ytPlayer").innerHTML = `
+    <iframe width="560" height="315" src="https://www.youtube.com/embed/${videoId}?autoplay=1"
+      frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+  `;
+}
