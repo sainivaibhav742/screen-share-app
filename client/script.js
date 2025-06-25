@@ -17,13 +17,17 @@ function createPeerConnection() {
     iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
   });
 
-  peer.ontrack = (event) => {
-    console.log("🎥 Stream received!");
-    video.srcObject = event.streams[0];
-    video.play().catch(console.error);
-    streamStatus.innerText = "✅ Viewer: Live Stream Active";
-    streamStatus.style.color = "green";
-  };
+let remoteStream = new MediaStream();
+
+peer.ontrack = (event) => {
+  console.log("🟣 Viewer: ontrack event fired");
+  remoteStream.addTrack(event.track);
+  video.srcObject = remoteStream;
+
+  streamStatus.innerText = "✅ Viewer: Live Stream Active";
+  streamStatus.style.color = "green";
+};
+
 
   peer.onicecandidate = (event) => {
     if (event.candidate) {
